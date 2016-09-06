@@ -12,7 +12,8 @@ var aws = require('aws-sdk'),
 	NullLogger = require('../util/null-logger'),
 	fs = Promise.promisifyAll(require('fs')),
 	getOwnerId = require('./get-owner-account-id'),
-	registerAuthorizers = require('./register-authorizers');
+	registerAuthorizers = require('./register-authorizers'),
+	registerUserPoolAuthorizers = require('./register-userpool-authorizers');
 module.exports = function rebuildWebApi(functionName, functionVersion, restApiId, requestedConfig, awsRegion, optionalLogger) {
 	'use strict';
 	var logger = optionalLogger || new NullLogger(),
@@ -31,6 +32,7 @@ module.exports = function rebuildWebApi(functionName, functionVersion, restApiId
 		ownerId,
 		knownIds = {},
 		authorizerIds,
+    userPoolAuthorizerIds,
 		inputTemplate,
 		findByPath = function (resourceItems, path) {
 			var result;
@@ -243,7 +245,7 @@ module.exports = function rebuildWebApi(functionName, functionVersion, restApiId
 					});
 				},
 				authorizerId = function () {
-					return methodOptions && (methodOptions.cognitoUserPoolAuthorizerId || (methodOptions.customAuthorizer && authorizerIds[methodOptions.customAuthorizer]));
+					return methodOptions && (methodOptions.customAuthorizer && authorizerIds[methodOptions.customAuthorizer] || userPoolAuthorizerIds[methodOptions.customAuthorizer]);
 				};
 			return apiGateway.putMethodAsync({
 				authorizationType: authorizationType(),
@@ -442,6 +444,15 @@ module.exports = function rebuildWebApi(functionName, functionVersion, restApiId
 			} else {
 				authorizerIds = {};
 			}
+		},
+		configureUserPoolAuthorizers = function () {
+			if (apiConfig.userPoolAuthorizers && apiConfig.userPoolAuthorizers !== {}) {
+				return registerUserPoolAuthorizers(apiConfig.userPoolAuthorizers, restApiId, awsRegion, functionVersion, logger).then(function (result) {
+					userPoolAuthorizerIds = result;
+				});
+			} else {
+				userPoolAuthorizerIds = {};
+			}
 		};
 	apiConfig = upgradeConfig(requestedConfig);
 	return getOwnerId(logger).then(function (accountOwnerId) {
@@ -450,6 +461,7 @@ module.exports = function rebuildWebApi(functionName, functionVersion, restApiId
 		.then(readTemplates)
 		.then(removeExistingResources)
 		.then(configureAuthorizers)
+		.then(configureUserPoolAuthorizers)
 		.then(rebuildApi)
 		.then(deployApi);
 };
